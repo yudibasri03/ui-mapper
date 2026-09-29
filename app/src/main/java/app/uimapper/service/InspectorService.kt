@@ -165,6 +165,7 @@ class InspectorService : AccessibilityService(), ServiceHost {
         }
 
         ServiceBridge.update { it.copy(connected = true, status = "Layanan terhubung") }
+        logEvent(EventLog.Tag.INFO, "Layanan terhubung")
 
         // Overlay windows stay above the keyguard: drop everything showing captured data when the device locks.
         if (!screenOffRegistered) {
@@ -201,6 +202,7 @@ class InspectorService : AccessibilityService(), ServiceHost {
     private fun shutdown() {
         if (shutDown) return
         shutDown = true
+        logEvent(EventLog.Tag.INFO, "Layanan berhenti")
         try {
             recorder?.stop()
         } catch (e: Exception) {
@@ -585,6 +587,7 @@ class InspectorService : AccessibilityService(), ServiceHost {
             throw e
         } catch (e: Exception) {
             Log.w(TAG, "Screenshot failed", e)
+            logEvent(EventLog.Tag.WARN, "Gagal mengambil tangkapan layar")
             null
         } ?: return null
         // Privacy first: an image that could not be redacted is not kept.
@@ -810,8 +813,12 @@ class InspectorService : AccessibilityService(), ServiceHost {
         if (session == null) {
             ServiceBridge.update { it.copy(mode = ServiceMode.IDLE, status = "Sesi tidak ditemukan") }
             flash("Sesi tidak ditemukan")
+            logEvent(EventLog.Tag.WARN, "Sesi tidak ditemukan")
             return
         }
+
+        val recLabel = session.appLabel ?: cmd.targetPkg ?: session.targetPkg ?: "aplikasi di depan"
+        logEvent(EventLog.Tag.REC, "Mulai merekam $recLabel")
 
         val rec = RouteRecorder(this, session.id, cmd.targetPkg)
         recorder = rec
@@ -832,7 +839,10 @@ class InspectorService : AccessibilityService(), ServiceHost {
         val target = cmd.targetPkg
         if (cmd.launchTarget && target != null) {
             val launched = launchApp(target)
-            if (!launched) flash("Tidak dapat membuka aplikasi target, buka secara manual")
+            if (!launched) {
+                flash("Tidak dapat membuka aplikasi target, buka secara manual")
+                logEvent(EventLog.Tag.WARN, "Tidak dapat membuka aplikasi target")
+            }
             rec.start(launched = launched)
         } else {
             rec.start(launched = false)
@@ -843,6 +853,7 @@ class InspectorService : AccessibilityService(), ServiceHost {
         recorder?.stop()
         recorder = null
         ServiceBridge.update { it.copy(mode = ServiceMode.IDLE, status = "Perekaman dihentikan") }
+        logEvent(EventLog.Tag.STOP, "Perekaman dihentikan")
     }
 
     private fun launchCaptureNow(sessionId: String?) {
@@ -878,6 +889,7 @@ class InspectorService : AccessibilityService(), ServiceHost {
         if (cap == null) {
             flash(NOTHING_TO_CAPTURE)
             ServiceBridge.update { it.copy(status = NOTHING_TO_CAPTURE) }
+            logEvent(EventLog.Tag.WARN, NOTHING_TO_CAPTURE)
             return
         }
 
@@ -917,6 +929,7 @@ class InspectorService : AccessibilityService(), ServiceHost {
                 }
             }
             flash("📸 $id · $label $suffix")
+            logEvent(EventLog.Tag.SNAP, "Tangkap $id · $label $suffix")
         } finally {
             shot?.recycle()
         }
@@ -988,6 +1001,7 @@ class InspectorService : AccessibilityService(), ServiceHost {
             ServiceBridge.update {
                 it.copy(inspecting = enabled, overlayVisible = if (enabled) true else it.overlayVisible)
             }
+            logEvent(EventLog.Tag.INSPECT, if (enabled) "Inspeksi elemen aktif" else "Inspeksi elemen dimatikan")
         } catch (e: Exception) {
             Log.e(TAG, "Inspect toggle failed", e)
             ServiceBridge.update { it.copy(inspecting = false, status = "Mode inspeksi gagal diaktifkan") }
@@ -999,6 +1013,15 @@ class InspectorService : AccessibilityService(), ServiceHost {
             overlayController?.flash(message)
         } catch (e: Exception) {
             Log.w(TAG, "Overlay flash failed", e)
+        }
+    }
+
+    /** Appends one entry to the shared live log; never lets a logging failure disturb the service. */
+    private fun logEvent(tag: EventLog.Tag, message: String) {
+        try {
+            EventLog.log(tag, message)
+        } catch (e: Exception) {
+            Log.w(TAG, "Event log failed", e)
         }
     }
 

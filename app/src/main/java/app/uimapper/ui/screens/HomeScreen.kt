@@ -29,6 +29,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.outlined.HelpOutline
+import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.outlined.Accessibility
 import androidx.compose.material.icons.outlined.Android
 import androidx.compose.material.icons.outlined.Apps
@@ -137,6 +138,7 @@ fun HomeScreen(
     onOpenSessions: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenHelp: () -> Unit,
+    onOpenLog: () -> Unit,
     onOpenSession: (String) -> Unit,
 ) {
     val context = LocalContext.current
@@ -275,6 +277,9 @@ fun HomeScreen(
             TopAppBar(
                 title = { Text("UI Mapper") },
                 actions = {
+                    IconButton(onClick = onOpenLog) {
+                        Icon(Icons.Filled.Terminal, contentDescription = "Live log")
+                    }
                     IconButton(onClick = onOpenSessions) {
                         Icon(Icons.Outlined.FolderOpen, contentDescription = "Daftar sesi")
                     }
@@ -311,6 +316,7 @@ fun HomeScreen(
                         session = activeSession,
                         onStop = ::stopRecording,
                         onOpenMap = { state.sessionId?.let(onOpenSession) },
+                        onOpenLog = onOpenLog,
                     )
                 }
             }
@@ -490,6 +496,7 @@ private fun HomeRecordingCard(
     session: Session?,
     onStop: () -> Unit,
     onOpenMap: () -> Unit,
+    onOpenLog: () -> Unit,
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -561,6 +568,12 @@ private fun HomeRecordingCard(
                     Spacer(Modifier.width(ButtonDefaults.IconSpacing))
                     Text("Lihat peta")
                 }
+            }
+
+            TextButton(onClick = onOpenLog, modifier = Modifier.align(Alignment.End)) {
+                Icon(Icons.Filled.Terminal, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                Spacer(Modifier.width(ButtonDefaults.IconSpacing))
+                Text("Lihat log")
             }
         }
     }

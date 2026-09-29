@@ -24,6 +24,7 @@ import androidx.navigation.navArgument
 import app.uimapper.ui.screens.AppPickerScreen
 import app.uimapper.ui.screens.HelpScreen
 import app.uimapper.ui.screens.HomeScreen
+import app.uimapper.ui.screens.LiveLogScreen
 import app.uimapper.ui.screens.ScreenDetailScreen
 import app.uimapper.ui.screens.SessionDetailScreen
 import app.uimapper.ui.screens.SessionsScreen
@@ -104,6 +105,7 @@ private fun UiMapperNavHost() {
                 onOpenSessions = { nav.navigateFrom(entry, Routes.SESSIONS) },
                 onOpenSettings = { nav.navigateFrom(entry, Routes.SETTINGS) },
                 onOpenHelp = { nav.navigateFrom(entry, Routes.HELP) },
+                onOpenLog = { nav.navigateFrom(entry, Routes.LOG) },
                 onOpenSession = { sessionId -> nav.openSession(entry, sessionId) },
             )
         }
@@ -121,6 +123,10 @@ private fun UiMapperNavHost() {
 
         composable(Routes.HELP) { entry ->
             HelpScreen(onBack = { nav.popFrom(entry) })
+        }
+
+        composable(Routes.LOG) { entry ->
+            LiveLogScreen(onBack = { nav.popFrom(entry) })
         }
 
         composable(Routes.SESSIONS) { entry ->

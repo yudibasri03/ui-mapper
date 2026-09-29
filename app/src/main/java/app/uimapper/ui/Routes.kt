@@ -9,6 +9,7 @@ object Routes {
     const val SESSION = "session/{sessionId}"
     const val SCREEN = "screen/{sessionId}/{screenId}"
     const val HELP = "help"
+    const val LOG = "livelog"
 
     fun session(sessionId: String) = "session/$sessionId"
     fun screen(sessionId: String, screenId: String) = "screen/$sessionId/$screenId"

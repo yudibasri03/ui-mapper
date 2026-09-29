@@ -11,8 +11,10 @@ import app.uimapper.data.AppSettings
 import app.uimapper.data.SessionStore
 import app.uimapper.model.ActionType
 import app.uimapper.model.Bounds
+import app.uimapper.model.EXTERNAL_PREFIX
 import app.uimapper.model.EdgeSource
 import app.uimapper.model.ElementRef
+import app.uimapper.model.NavEdge
 import app.uimapper.model.START_NODE
 import app.uimapper.model.UiNode
 import app.uimapper.model.externalNodeId
@@ -95,6 +97,10 @@ internal class RouteRecorder(
     fun start(launched: Boolean) {
         if (stopped) return
         this.launched = launched
+        logEvent(
+            EventLog.Tag.REC,
+            "Merekam " + (targetPkg ?: "aplikasi di depan") + (if (launched) " (membuka aplikasi)" else ""),
+        )
         if (!launched) {
             scheduleCapture(restart = true)
         } else {
@@ -107,6 +113,7 @@ internal class RouteRecorder(
     }
 
     fun stop() {
+        if (!stopped) logEvent(EventLog.Tag.STOP, "Perekaman selesai")
         stopped = true
         captureJob?.cancel()
         captureJob = null
@@ -288,9 +295,10 @@ internal class RouteRecorder(
                 pending = null
                 outsidePkg = pkg
                 val element = p?.let { resolveElement(from, it, lastRoot) }
-                withContext(Dispatchers.IO) {
+                val edge = withContext(Dispatchers.IO) {
                     SessionStore.recordEdge(sessionId, from, externalNodeId(pkg), ActionType.EXTERNAL, element, EdgeSource.MANUAL)
                 }
+                if (edge != null) logEdge(edge)
                 val label = withContext(Dispatchers.IO) { AppInfo.label(host.context, pkg) }
                 publish(screenId = null, label = null, isNew = false, status = "Pindah ke aplikasi lain: $label")
             } catch (e: CancellationException) {
@@ -493,9 +501,10 @@ internal class RouteRecorder(
             val edgeFrom: String = from
             val edgeAction = action
             val edgeElement = element
-            withContext(Dispatchers.IO) {
+            val edge = withContext(Dispatchers.IO) {
                 SessionStore.recordEdge(sessionId, edgeFrom, newId, edgeAction, edgeElement, EdgeSource.MANUAL)
             }
+            if (edge != null) logEdge(edge)
         }
 
         // ---- navigation stack: returning to a screen already on the stack pops back to it ----
@@ -514,6 +523,12 @@ internal class RouteRecorder(
         ambiguous = false
 
         val label = match.summary.label
+        if (match.isNew) {
+            logEvent(
+                EventLog.Tag.NEW,
+                "$newId · $label (${match.summary.nodeCount} elemen, ${match.summary.clickableCount} klik)",
+            )
+        }
         publish(
             screenId = newId,
             label = label,
@@ -623,6 +638,34 @@ internal class RouteRecorder(
         } catch (e: Exception) {
             Log.w(TAG, "Overlay flash failed", e)
         }
+    }
+
+    /** Appends one entry to the shared live log; never lets a logging failure disturb recording. */
+    private fun logEvent(tag: EventLog.Tag, message: String) {
+        try {
+            EventLog.log(tag, message)
+        } catch (e: Exception) {
+            Log.w(TAG, "Event log failed", e)
+        }
+    }
+
+    /**
+     * One log line describing a freshly recorded [edge]; the tag is chosen by its action and the label
+     * reuses the element the recorder already resolved (no new text is read from live nodes).
+     */
+    private fun logEdge(edge: NavEdge) {
+        val (tag, message) = when (edge.action) {
+            ActionType.CLICK, ActionType.LONG_CLICK -> {
+                val label = edge.element?.display()?.takeIf { it.isNotBlank() } ?: "elemen"
+                EventLog.Tag.TAP to "Ketuk \"$label\" — ${edge.from} → ${edge.to}"
+            }
+            ActionType.LAUNCH -> EventLog.Tag.REC to "Buka aplikasi → ${edge.to}"
+            ActionType.BACK -> EventLog.Tag.BACK to "Kembali ${edge.from} → ${edge.to}"
+            ActionType.EXTERNAL ->
+                EventLog.Tag.EXT to "Pindah ke aplikasi lain (${edge.to.removePrefix(EXTERNAL_PREFIX)})"
+            else -> EventLog.Tag.SEEN to "Transisi ${edge.from} → ${edge.to}"
+        }
+        logEvent(tag, message)
     }
 
     private companion object {
