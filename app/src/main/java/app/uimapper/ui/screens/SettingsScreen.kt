@@ -21,6 +21,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Keyboard
 import androidx.compose.material.icons.outlined.Lock
@@ -100,6 +101,8 @@ fun SettingsScreen(onBack: () -> Unit) {
 
     val sessions by SessionStore.sessions.collectAsStateWithLifecycle()
     val serviceState by ServiceBridge.state.collectAsStateWithLifecycle()
+    // Ticks on every settings change so the opt-in toggle below reflects the stored value.
+    val settingsVersion by AppSettings.version.collectAsStateWithLifecycle()
 
     var similarity by remember { mutableFloatStateOf(AppSettings.similarityThreshold) }
     var settleMs by remember {
@@ -283,8 +286,31 @@ fun SettingsScreen(onBack: () -> Unit) {
                 )
                 SettingsBullet(
                     Icons.Outlined.Visibility,
-                    "UI Mapper hanya mengamati. Aplikasi ini tidak pernah mengetuk, menggeser, atau " +
-                        "menjalankan aksi apa pun di aplikasi lain.",
+                    "Secara bawaan UI Mapper hanya mengamati. Aplikasi ini tidak pernah mengetuk, menggeser, " +
+                        "atau menjalankan aksi apa pun di aplikasi lain — kecuali bila Anda mengaktifkan " +
+                        "\"edit teks\" di bawah.",
+                )
+            }
+
+            // ---- Text editing (opt-in) ----
+            SettingsSection(title = "Edit teks (lanjutan)", icon = Icons.Outlined.Edit) {
+                val allowTextEditing = remember(settingsVersion) { AppSettings.allowTextEditing }
+                SettingsSwitchRow(
+                    title = "Izinkan edit teks pada aplikasi target",
+                    description = buildString {
+                        append("Mati secara bawaan. Saat aktif, UI Mapper dapat mengisi atau menghapus teks ")
+                        append("pada kolom input aplikasi yang sedang Anda inspeksi, atas perintah Anda — ")
+                        append("jadi UI Mapper tidak lagi hanya mengamati, tetapi juga beraksi pada aplikasi ")
+                        append("tersebut. Gunakan hanya pada aplikasi milik Anda atau yang berwenang Anda uji. ")
+                        append("Teks yang Anda masukkan tidak disimpan maupun dicatat.")
+                    },
+                    checked = allowTextEditing,
+                    enabled = true,
+                    onCheckedChange = { AppSettings.allowTextEditing = it },
+                )
+                SettingsNote(
+                    "UI Mapper hanya mengisi/menghapus teks bila Anda sendiri yang memintanya dari panel " +
+                        "inspeksi. Aplikasi ini tidak pernah mengetuk, menggeser, atau menjalankan gestur apa pun.",
                 )
             }
 

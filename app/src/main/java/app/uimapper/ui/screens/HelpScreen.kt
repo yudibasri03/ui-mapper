@@ -20,6 +20,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.FileDownload
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Palette
@@ -190,8 +191,9 @@ fun HelpScreen(onBack: () -> Unit) {
                         text = "UI Mapper adalah inspektur UI untuk riset UX dan QA. Aplikasi ini memetakan " +
                             "elemen tampilan (kelas, resource-id, teks, posisi, aksi) dan rute navigasi " +
                             "tombol antar-layar dari aplikasi lain di ponsel ini, sambil Anda sendiri " +
-                            "menjelajahinya. UI Mapper hanya mengamati dan tidak pernah mengetuk apa pun " +
-                            "untuk Anda.",
+                            "menjelajahinya. Secara bawaan UI Mapper hanya mengamati dan tidak pernah " +
+                            "mengetuk apa pun untuk Anda; satu-satunya pengecualian adalah fitur edit teks " +
+                            "opsional yang mati secara bawaan.",
                         style = MaterialTheme.typography.bodyMedium,
                     )
                 }
@@ -205,6 +207,22 @@ fun HelpScreen(onBack: () -> Unit) {
 
             HelpSection(title = "Warna pada inspektur", icon = Icons.Outlined.Palette) {
                 HelpLegends.forEach { legend -> HelpLegendRow(legend) }
+            }
+
+            HelpSection(title = "Edit teks (opsional)", icon = Icons.Outlined.Edit) {
+                HelpBullet(
+                    "Fitur ini mati secara bawaan. Aktifkan dulu \"Izinkan edit teks pada aplikasi target\" " +
+                        "di Pengaturan.",
+                )
+                HelpBullet(
+                    "Buka mode inspeksi dari gelembung, pilih kolom yang bisa diedit (editable), ketik teks " +
+                        "pada panel, lalu ketuk Terapkan. Kosongkan teks lalu Terapkan untuk menghapus isi kolom.",
+                )
+                HelpBullet(
+                    "Berbeda dari fitur lain, ini membuat UI Mapper beraksi pada aplikasi target " +
+                        "(mengisi/menghapus kolom) atas perintah Anda, bukan lagi hanya mengamati. Gunakan hanya " +
+                        "pada aplikasi milik Anda atau yang berwenang Anda uji. Teks yang Anda masukkan tidak disimpan.",
+                )
             }
 
             HelpSection(title = "Isi berkas ekspor", icon = Icons.Outlined.FileDownload) {
@@ -223,8 +241,10 @@ fun HelpScreen(onBack: () -> Unit) {
                         "di layar tetap bisa terlihat di tangkapan layar.",
                 )
                 HelpBullet(
-                    "UI Mapper tidak pernah mengetuk, menggeser, atau menjalankan aksi apa pun di " +
-                        "aplikasi lain.",
+                    "Secara bawaan UI Mapper tidak pernah mengetuk, menggeser, atau menjalankan aksi apa pun " +
+                        "di aplikasi lain. Satu-satunya pengecualian adalah fitur edit teks opsional (mati " +
+                        "secara bawaan): bila Anda mengaktifkannya, UI Mapper dapat mengisi/menghapus teks kolom " +
+                        "input atas perintah Anda; teks itu tidak disimpan.",
                 )
                 HelpBullet("Data hanya keluar dari perangkat jika Anda sendiri mengekspor dan membagikannya.")
             }

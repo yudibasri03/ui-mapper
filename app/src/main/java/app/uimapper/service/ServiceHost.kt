@@ -71,6 +71,9 @@ interface ServiceHost {
 
     /** Real display size in pixels (width, height). */
     fun screenSize(): Pair<Int, Int>
+
+    /** Set text on the live EDITABLE node in the foreground target app that matches [ref]. Requires AppSettings.allowTextEditing == true. Empty string clears the field. Returns true only when a matching editable node was found and ACTION_SET_TEXT succeeded. Never stores or logs the text. */
+    suspend fun setNodeText(ref: app.uimapper.model.ElementRef, text: String): Boolean
 }
 
 /** Floating overlay shown on top of other apps (implemented by overlay.OverlayController). */

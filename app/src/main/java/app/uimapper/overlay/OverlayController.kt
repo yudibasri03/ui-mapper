@@ -30,11 +30,14 @@ import android.view.ViewConfiguration
 import android.view.WindowInsets
 import android.view.WindowManager
 import android.view.animation.DecelerateInterpolator
+import android.view.inputmethod.InputMethodManager
+import android.widget.EditText
 import android.widget.TextView
 import android.widget.Toast
 import app.uimapper.core.AppInfo
 import app.uimapper.core.NodeCapture
 import app.uimapper.core.UiTree
+import app.uimapper.data.AppSettings
 import app.uimapper.data.SessionStore
 import app.uimapper.model.SessionMode
 import app.uimapper.model.UiNode
@@ -144,6 +147,12 @@ class OverlayController(private val host: ServiceHost) : OverlayUi {
     private var filterOnly = false
     private var panelAtTop = false
     private var startingRecording = false
+    /** The panel window is focusable for the live text editor (so the soft keyboard can attach). */
+    private var editingActive = false
+    /** A tree-row tap is driving the current selection: do not scroll the tree back to it. */
+    private var suppressTreeScroll = false
+    /** idx of the node the text editor currently targets; the field is cleared when it changes. */
+    private var lastEditNodeIdx = -1
     /** A background re-read of the inspected screen is posted. */
     private var layerRefreshScheduled = false
     /** The screen changed while a capture was reading it: re-read once more when it is done. */
@@ -173,6 +182,8 @@ class OverlayController(private val host: ServiceHost) : OverlayUi {
     private val layerListener = object : InspectLayerView.Listener {
         override fun onSelectionChanged(node: UiNode?, fromTouch: Boolean) {
             renderPanel(scrollTop = true)
+            // A tree-row tap already positions the tree; anything else (screen tap, parent/child) scrolls it.
+            syncTreeSelection(node, scrollIntoView = !suppressTreeScroll)
         }
 
         override fun onLayerResized() {
@@ -905,6 +916,12 @@ class OverlayController(private val host: ServiceHost) : OverlayUi {
             // Service unreachable: never leave a touch-blocking layer behind.
             if (!ServiceBridge.send(ServiceCommand.SetInspect(false))) disableInspect()
         }
+        p.onTabChanged = { onPanelTab(it) }
+        p.onCollapseChanged = { updatePanelFocusable() }
+        p.hierarchyView.onRowSelected = { onTreeRowSelected(it) }
+        p.onEditFocused = { showImeFor(it) }
+        p.applyBtn.setOnClickListener { applyTextEdit(clear = false) }
+        p.clearBtn.setOnClickListener { applyTextEdit(clear = true) }
         p.setFilterActive(filterOnly)
         val lp = overlayParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -953,6 +970,17 @@ class OverlayController(private val host: ServiceHost) : OverlayUi {
         captureJob = null
         captureGen++
         capture = Capture.Idle
+        // Close the keyboard and drop the field before the window goes away.
+        hideImeAndBlur()
+        propertyPanel?.let {
+            it.clearEditText()
+            it.setEditMode(PropertyPanel.EditMode.HIDDEN)
+            it.selectTab(PropertyPanel.Tab.PROPERTIES)
+            it.hierarchyView.setRows(emptyList())
+            it.hierarchyView.setSelectedNodeIdx(-1)
+        }
+        editingActive = false
+        lastEditNodeIdx = -1
         layerWin?.let { detach(it) }
         panelWin?.let { detach(it) }
         layerView?.setData(null)
@@ -1066,6 +1094,8 @@ class OverlayController(private val host: ServiceHost) : OverlayUi {
             is Capture.Ready -> {
                 layer.setData(result.data)
                 layer.setMessage(null)
+                // One flattened row list per capture, reused by the tree and for scroll-to-selection.
+                propertyPanel?.hierarchyView?.setRows(result.data.rows)
                 if (previous != null) {
                     val match = UiTree.match(
                         result.data.root,
@@ -1081,10 +1111,13 @@ class OverlayController(private val host: ServiceHost) : OverlayUi {
             is Capture.Failed -> {
                 layer.setData(null)
                 layer.setMessage("Struktur layar tidak terbaca")
+                propertyPanel?.hierarchyView?.setRows(emptyList())
             }
             Capture.Idle, Capture.Loading -> Unit
         }
         renderPanel(scrollTop = scrollTop)
+        // layer.select() above ran with notify = false; mirror the resulting selection into the tree here.
+        if (result is Capture.Ready) syncTreeSelection(layer.selected, scrollIntoView = true)
     }
 
     private fun layoutPanel() {
@@ -1094,7 +1127,8 @@ class OverlayController(private val host: ServiceHost) : OverlayUi {
         val margin = ctx.dpi(8)
         pw.lp.width = min(sw - 2 * margin, ctx.dpi(PANEL_MAX_WIDTH_DP))
         pw.lp.height = WindowManager.LayoutParams.WRAP_CONTENT
-        pw.lp.gravity = (if (panelAtTop) Gravity.TOP else Gravity.BOTTOM) or Gravity.CENTER_HORIZONTAL
+        // While editing, keep the panel at the top so the soft keyboard (bottom) does not cover the field.
+        pw.lp.gravity = (if (panelAtTop || editingActive) Gravity.TOP else Gravity.BOTTOM) or Gravity.CENTER_HORIZONTAL
         pw.lp.x = 0
         pw.lp.y = margin
         val cap = (sh * PANEL_HEIGHT_FRACTION).toInt()
@@ -1105,7 +1139,8 @@ class OverlayController(private val host: ServiceHost) : OverlayUi {
     private fun updatePanelSide(sel: UiNode?) {
         val pw = panelWin ?: return
         val (_, sh) = host.screenSize()
-        val wantTop = sel != null && sel.bounds.centerY > sh / 2
+        // editingActive already forces the top in layoutPanel; don't fight it here.
+        val wantTop = editingActive || (sel != null && sel.bounds.centerY > sh / 2)
         if (wantTop == panelAtTop) return
         panelAtTop = wantTop
         layoutPanel()
@@ -1136,12 +1171,157 @@ class OverlayController(private val host: ServiceHost) : OverlayUi {
                 )
             }
         }
+        // Driven by the selection itself (kept during a quiet reload), so the editor does not flicker.
+        updateEditSection(sel)
         if (scrollTop) p.scrollBodyToTop()
         // While (re)loading keep the panel where it is to avoid a jump on every refresh.
         when (c) {
             is Capture.Ready -> updatePanelSide(sel)
             is Capture.Failed -> updatePanelSide(null)
             Capture.Idle, Capture.Loading -> Unit
+        }
+    }
+
+    /** Show the live text editor only for an editable node, and only when the setting allows it. */
+    private fun updateEditSection(sel: UiNode?) {
+        val p = propertyPanel ?: return
+        val mode = when {
+            sel != null && sel.editable && textEditingAllowed() -> PropertyPanel.EditMode.EDITABLE
+            sel != null && sel.editable -> PropertyPanel.EditMode.HINT
+            else -> PropertyPanel.EditMode.HIDDEN
+        }
+        // Never carry typed text over from one field to another: clear when the target node changes.
+        val nodeIdx = if (mode == PropertyPanel.EditMode.EDITABLE) sel?.idx ?: -1 else -1
+        if (nodeIdx != lastEditNodeIdx) {
+            p.clearEditText()
+            lastEditNodeIdx = nodeIdx
+        }
+        p.setEditMode(mode)
+        updatePanelFocusable()
+    }
+
+    private fun textEditingAllowed(): Boolean = try {
+        AppSettings.allowTextEditing
+    } catch (e: Exception) {
+        Log.w(TAG, "allowTextEditing unavailable", e)
+        false
+    }
+
+    /**
+     * Make the panel window focusable only while the live editor is on the Properties tab, so the soft
+     * keyboard can attach to the field; otherwise keep it non-focusable as before.
+     */
+    private fun updatePanelFocusable() {
+        val pw = panelWin ?: return
+        val panel = propertyPanel ?: return
+        val want = panel.editableActive() && panel.activeTab == PropertyPanel.Tab.PROPERTIES && !panel.collapsed
+        val newFlags = if (want) {
+            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+        } else {
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+        }
+        if (want == editingActive && pw.lp.flags == newFlags) return
+        editingActive = want
+        pw.lp.flags = newFlags
+        pw.lp.softInputMode = if (want) {
+            WindowManager.LayoutParams.SOFT_INPUT_ADJUST_PAN or WindowManager.LayoutParams.SOFT_INPUT_STATE_UNSPECIFIED
+        } else {
+            WindowManager.LayoutParams.SOFT_INPUT_STATE_UNSPECIFIED
+        }
+        if (!want) hideImeAndBlur()
+        layoutPanel()
+        relayout(pw)
+    }
+
+    private fun showImeFor(view: EditText) {
+        val imm = host.context.getSystemService(InputMethodManager::class.java) ?: return
+        main.post {
+            if (destroyed || !view.isAttachedToWindow) return@post
+            try {
+                imm.showSoftInput(view, InputMethodManager.SHOW_IMPLICIT)
+            } catch (e: Exception) {
+                Log.w(TAG, "showSoftInput failed", e)
+            }
+        }
+    }
+
+    private fun hideImeAndBlur() {
+        val panel = propertyPanel ?: return
+        panel.blurEdit()
+        val token = panel.root.windowToken ?: return
+        try {
+            host.context.getSystemService(InputMethodManager::class.java)?.hideSoftInputFromWindow(token, 0)
+        } catch (e: Exception) {
+            Log.w(TAG, "hideSoftInput failed", e)
+        }
+    }
+
+    private fun onPanelTab(tab: PropertyPanel.Tab) {
+        hideImeAndBlur()
+        updatePanelFocusable()
+        if (tab == PropertyPanel.Tab.HIERARCHY) {
+            layerView?.selected?.let { propertyPanel?.hierarchyView?.scrollToNode(it.idx) }
+        }
+    }
+
+    private fun onTreeRowSelected(node: UiNode) {
+        val layer = layerView ?: return
+        suppressTreeScroll = true
+        layer.select(node)
+        suppressTreeScroll = false
+        // If the idx was unchanged, select() returned without notifying; keep the row highlight in sync.
+        propertyPanel?.hierarchyView?.setSelectedNodeIdx(node.idx)
+    }
+
+    private fun syncTreeSelection(node: UiNode?, scrollIntoView: Boolean) {
+        val tree = propertyPanel?.hierarchyView ?: return
+        tree.setSelectedNodeIdx(node?.idx ?: -1)
+        if (scrollIntoView && node != null) tree.scrollToNode(node.idx)
+    }
+
+    /**
+     * Set or clear the text of the selected editable node in the app underneath, through the service. The
+     * typed text is passed straight through and never stored or logged here. On success, recapture (the
+     * same path as "Segarkan") so the tree / highlight / panel reflect the new state.
+     */
+    private fun applyTextEdit(clear: Boolean) {
+        val c = capture as? Capture.Ready ?: return
+        val panel = propertyPanel ?: return
+        val sel = layerView?.selected
+        if (sel == null || !sel.editable) {
+            showFlash("Pilih kolom yang bisa diisi dulu")
+            return
+        }
+        if (!textEditingAllowed()) {
+            showFlash(MSG_EDIT_DISABLED)
+            return
+        }
+        val text = if (clear) "" else panel.editTextValue()
+        val ref = UiTree.toElementRef(c.data.root, sel)
+        hideImeAndBlur()
+        host.scope.launch {
+            val ok = try {
+                host.setNodeText(ref, text)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "setNodeText failed", e)
+                false
+            }
+            if (destroyed) return@launch
+            showFlash(
+                when {
+                    ok && clear -> MSG_CLEAR_OK
+                    ok -> MSG_APPLY_OK
+                    clear -> MSG_CLEAR_FAIL
+                    else -> MSG_APPLY_FAIL
+                },
+            )
+            if (ok) {
+                panel.clearEditText()
+                lastEditNodeIdx = -1
+                startCapture(keepSelection = true)
+            }
         }
     }
 
@@ -1333,10 +1513,16 @@ class OverlayController(private val host: ServiceHost) : OverlayUi {
         const val MENU_WIDTH_DP = 264
         const val MENU_CHROME_DP = 96
         const val PANEL_MAX_WIDTH_DP = 560
-        const val PANEL_CHROME_DP = 150
+        // Header + tab row + action buttons chrome outside the scrollable body / tree.
+        const val PANEL_CHROME_DP = 200
         const val PANEL_HEIGHT_FRACTION = 0.42f
         const val MAX_VALUE_CHARS = 300
         const val MSG_LOADING = "Memuat struktur..."
+        const val MSG_APPLY_OK = "✏️ Teks diterapkan"
+        const val MSG_APPLY_FAIL = "Gagal: kolom tidak dapat diisi"
+        const val MSG_CLEAR_OK = "Kolom dikosongkan"
+        const val MSG_CLEAR_FAIL = "Gagal: kolom tidak dapat dikosongkan"
+        const val MSG_EDIT_DISABLED = "Aktifkan \"edit teks\" di Pengaturan untuk mengisi kolom ini"
         const val MSG_NOTHING =
             "Tidak ada layar aplikasi yang bisa dibaca. Buka aplikasi yang ingin diinspeksi, lalu ketuk Segarkan."
         const val MSG_EMPTY =

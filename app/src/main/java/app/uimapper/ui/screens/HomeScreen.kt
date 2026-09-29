@@ -444,7 +444,8 @@ private fun HomeServiceStatusCard(
                 Text(
                     text = "UI Mapper memerlukan akses aksesibilitas untuk membaca struktur tampilan aplikasi " +
                         "yang Anda petakan: elemen, teks tombol, ID, dan posisinya. Semua data tetap di " +
-                        "perangkat ini, dan UI Mapper tidak pernah mengetuk apa pun untuk Anda.",
+                        "perangkat ini. Secara bawaan UI Mapper hanya mengamati; ia hanya dapat " +
+                        "mengisi teks kolom input bila Anda mengaktifkan \"edit teks\" di Pengaturan.",
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 Text(

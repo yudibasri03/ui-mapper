@@ -12,6 +12,7 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Rect
 import android.os.Build
+import android.os.Bundle
 import android.os.SystemClock
 import android.provider.Settings
 import android.util.DisplayMetrics
@@ -29,6 +30,8 @@ import app.uimapper.core.NodeCapture
 import app.uimapper.core.UiTree
 import app.uimapper.data.AppSettings
 import app.uimapper.data.SessionStore
+import app.uimapper.model.Bounds
+import app.uimapper.model.ElementRef
 import app.uimapper.model.ScreenSnapshot
 import app.uimapper.model.SessionMode
 import app.uimapper.model.UiNode
@@ -786,6 +789,170 @@ class InspectorService : AccessibilityService(), ServiceHost {
         dm.widthPixels to dm.heightPixels
     }
 
+    // ---- live text editing (opt-in) ----
+    //
+    // The one place UI Mapper acts on another app instead of only observing it. Gated behind
+    // [AppSettings.allowTextEditing] (off by default) and driven only by an explicit user request from the
+    // inspect panel. It never dispatches taps/gestures, never reads the field's existing text, and never
+    // stores or logs the text that is written.
+
+    override suspend fun setNodeText(ref: ElementRef, text: String): Boolean {
+        if (!AppSettings.allowTextEditing) return false
+        val pkg = foregroundPackage() ?: return false
+        // Live lookup + action run detached on Dispatchers.IO (binder IPC) under the capture timeout,
+        // reusing the same window enumeration as a normal capture.
+        val ok = windowIpc {
+            val roots = rootsFor(scanWindows(), pkg)
+            if (roots.isEmpty()) null else applyTextToEditable(roots, ref, text) { !isActive }
+        } ?: false
+        // Log success/failure and the field id only, never the text value.
+        val field = ref.resId?.let { it.substringAfter(":id/", it) } ?: ref.cls?.substringAfterLast('.') ?: "kolom"
+        logEvent(EventLog.Tag.INFO, "Edit teks pada $field: " + if (ok) "berhasil" else "gagal")
+        return ok
+    }
+
+    /**
+     * Finds the live editable node matching [ref] among [roots] and writes [text] to it. Runs on the
+     * window-IPC thread. Prefers a resource-id lookup, else scores the live tree like [UiTree.match].
+     * Never reads the field's current value and never logs [text]. Returns true only when an editable node
+     * matched and ACTION_SET_TEXT succeeded. Recycles every node it obtained here; the window [roots]
+     * belong to the caller and are left untouched.
+     */
+    private fun applyTextToEditable(
+        roots: List<AccessibilityNodeInfo>,
+        ref: ElementRef,
+        text: String,
+        isCancelled: () -> Boolean,
+    ): Boolean {
+        // (node, owned): owned nodes were obtained here and are recycled before returning.
+        val scan = ArrayList<Pair<AccessibilityNodeInfo, Boolean>>()
+        try {
+            val resId = ref.resId
+            if (!resId.isNullOrEmpty()) {
+                for (root in roots) {
+                    if (isCancelled()) return false
+                    val found = try {
+                        root.findAccessibilityNodeInfosByViewId(resId)
+                    } catch (_: Exception) {
+                        null
+                    } ?: continue
+                    for (n in found) if (n != null) scan += n to true
+                }
+            }
+            if (scan.isEmpty()) {
+                // No usable id: score the live tree, bounded like NodeCapture so a huge tree cannot hang us.
+                val stack = ArrayDeque<AccessibilityNodeInfo>()
+                for (root in roots) {
+                    scan += root to false
+                    stack.addLast(root)
+                }
+                var visited = 0
+                while (stack.isNotEmpty()) {
+                    if (isCancelled() || visited >= MAX_EDIT_SCAN_NODES) break
+                    val node = stack.removeLast()
+                    visited++
+                    val count = try {
+                        node.childCount
+                    } catch (_: Exception) {
+                        0
+                    }
+                    for (i in 0 until count) {
+                        if (scan.size >= MAX_EDIT_SCAN_NODES) break
+                        val child = try {
+                            node.getChild(i)
+                        } catch (_: Exception) {
+                            null
+                        } ?: continue
+                        scan += child to true
+                        stack.addLast(child)
+                    }
+                }
+            }
+
+            var best: AccessibilityNodeInfo? = null
+            var bestScore = 0
+            for ((node, _) in scan) {
+                if (isCancelled()) break
+                if (!isEditableLive(node)) continue
+                val score = scoreLiveNode(node, ref)
+                if (score > bestScore) {
+                    bestScore = score
+                    best = node
+                }
+            }
+            val target = best ?: return false
+            // Same confidence gate as UiTree.match: refuse a weak match rather than edit the wrong field.
+            if (bestScore < MATCH_MIN_SCORE) return false
+            return performSetText(target, text)
+        } finally {
+            for ((node, owned) in scan) {
+                if (!owned) continue
+                try {
+                    node.recycle()
+                } catch (_: Exception) {
+                    // Already recycled / stale.
+                }
+            }
+        }
+    }
+
+    /**
+     * Scores a live node against [ref], mirroring [UiTree.match] minus the text term: every node scored
+     * here is already editable, and reading an editable field's live text would break the "never read the
+     * existing text" rule. The text term is a no-op for editable fields anyway (their [ElementRef.text] is
+     * always null for privacy), so dropping it does not weaken matching. Any stale-node access is caught.
+     */
+    private fun scoreLiveNode(n: AccessibilityNodeInfo, ref: ElementRef): Int = try {
+        var score = 0
+        if (ref.resId != null && n.viewIdResourceName == ref.resId) score += 4
+        if (!ref.desc.isNullOrBlank() && n.contentDescription?.toString() == ref.desc) score += 2
+        if (ref.cls != null && n.className?.toString() == ref.cls) score += 1
+        val refBounds = ref.bounds
+        if (refBounds != null && !refBounds.isEmpty()) {
+            val r = Rect()
+            n.getBoundsInScreen(r)
+            val nb = Bounds(r.left, r.top, r.right, r.bottom)
+            if (nb == refBounds) score += 5
+            else if (UiTree.iou(nb, refBounds) > 0.7f) score += 2
+        }
+        if (isActionableLive(n)) score += 1
+        score
+    } catch (_: Exception) {
+        0
+    }
+
+    private fun isEditableLive(n: AccessibilityNodeInfo): Boolean = try {
+        n.isEditable
+    } catch (_: Exception) {
+        false
+    }
+
+    private fun isActionableLive(n: AccessibilityNodeInfo): Boolean = try {
+        (n.isClickable || n.isLongClickable) && n.isEnabled && n.isVisibleToUser
+    } catch (_: Exception) {
+        false
+    }
+
+    /**
+     * Focuses (best effort) and writes [text] to [node] via ACTION_SET_TEXT. Never reads the field's
+     * current value and never logs [text]. Returns the ACTION_SET_TEXT result. Editable password fields
+     * are allowed (the user explicitly targets one when testing their own app); the existing value is
+     * never read and the new value is never logged.
+     */
+    private fun performSetText(node: AccessibilityNodeInfo, text: String): Boolean = try {
+        try {
+            if (node.isFocusable && !node.isFocused) node.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+        } catch (_: Exception) {
+            // Focus is optional; some editors accept ACTION_SET_TEXT without it.
+        }
+        val args = Bundle().apply {
+            putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
+        }
+        node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+    } catch (_: Exception) {
+        false
+    }
+
     // ---- commands ----
 
     private suspend fun handleCommand(cmd: ServiceCommand) {
@@ -1035,6 +1202,11 @@ class InspectorService : AccessibilityService(), ServiceHost {
         const val MIN_IDLE_WAIT_MS = 150L
         const val IDLE_POLL_MS = 60L
         const val CAPTURE_TIMEOUT_MS = 5000L
+
+        /** Upper bound on live nodes scanned for a text-edit target (mirrors NodeCapture's node cap). */
+        const val MAX_EDIT_SCAN_NODES = 5000
+        /** Minimum match score (same gate as UiTree.match) before writing to a found node. */
+        const val MATCH_MIN_SCORE = 5
 
         const val OVERLAY_HIDE_SETTLE_MS = 70L
         const val SHOT_TIMEOUT_MS = 3000L

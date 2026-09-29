@@ -29,6 +29,8 @@ internal class LayerData private constructor(
     /** Every captured node except the synthetic multi-window root. */
     val totalCount: Int,
     val actionableCount: Int,
+    /** Whole-tree rows (root..leaves) for the hierarchy panel, pre-built off the main thread. */
+    val rows: List<HierarchyPanelView.Row>,
 ) {
     companion object {
         fun build(root: UiNode): LayerData {
@@ -49,7 +51,7 @@ internal class LayerData private constructor(
                     else -> others += n
                 }
             }
-            return LayerData(root, candidates, others, texts, actions, total, actions.size)
+            return LayerData(root, candidates, others, texts, actions, total, actions.size, HierarchyPanelView.buildRows(root))
         }
     }
 }

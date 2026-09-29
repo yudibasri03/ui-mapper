@@ -12,6 +12,7 @@ import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
 import android.os.Build
+import android.text.InputType
 import android.text.TextUtils
 import android.util.TypedValue
 import android.view.Gravity
@@ -19,6 +20,8 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
+import android.view.inputmethod.EditorInfo
+import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -413,8 +416,17 @@ internal class MenuPanel(private val ctx: Context) {
     }
 }
 
-/** The property panel shown while inspecting: header, scrollable property list and action buttons. */
+/**
+ * The panel shown while inspecting. It has two tabs the user switches at the top: "Properti" (the
+ * scrollable property list plus, when enabled, the live text editor) and "Hierarki" (the node tree). Both
+ * read the same selection the controller owns. Below the tabs sit the shared action buttons.
+ */
 internal class PropertyPanel(private val ctx: Context) {
+
+    enum class Tab { PROPERTIES, HIERARCHY }
+
+    /** Which extra section the "Properti" tab shows for the selected node's text editing. */
+    enum class EditMode { HIDDEN, HINT, EDITABLE }
 
     val root = LinearLayout(ctx).apply {
         orientation = LinearLayout.VERTICAL
@@ -441,13 +453,62 @@ internal class PropertyPanel(private val ctx: Context) {
         contentDescription = "Ciutkan panel"
         isClickable = true
     }
-    private val scroll = MaxHeightScrollView(ctx).apply {
+
+    // ---- tabs ----
+    private val tabPropBtn = makeButton(ctx, "Properti", OverlayColors.BLUE, fullWidth = false)
+    private val tabTreeBtn = makeButton(ctx, "Hierarki", OverlayColors.BUTTON, fullWidth = false)
+    private val tabRow = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
+
+    // ---- properties view ----
+    private val propScroll = MaxHeightScrollView(ctx).apply {
         isVerticalScrollBarEnabled = true
         overScrollMode = View.OVER_SCROLL_NEVER
     }
+    private val propContent = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
     private val body = makeText(ctx, 13f, OverlayColors.TEXT).apply {
         setLineSpacing(ctx.dpf(2f), 1f)
     }
+
+    // ---- live text editor (opt-in; only for editable nodes) ----
+    private val editTitle = makeText(ctx, 13f, OverlayColors.TEXT, bold = true).apply {
+        text = "Edit teks"
+        visibility = View.GONE
+    }
+    val editText = EditText(ctx).apply {
+        hint = "Teks baru…"
+        setTextColor(OverlayColors.TEXT)
+        setHintTextColor(OverlayColors.MUTED)
+        setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+        background = roundedRect(OverlayColors.NEAR_BLACK, ctx.dpf(8f), ctx.dpi(1), OverlayColors.SURFACE_STROKE)
+        setPadding(ctx.dpi(10), ctx.dpi(8), ctx.dpi(10), ctx.dpi(8))
+        isSingleLine = true
+        isFocusableInTouchMode = true
+        // Privacy: no suggestions, no autofill and no personalised IME learning of what is typed here.
+        inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+        imeOptions = EditorInfo.IME_ACTION_DONE or EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING
+        importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO
+        visibility = View.GONE
+    }
+    val applyBtn = makeButton(ctx, "Terapkan", OverlayColors.GREEN, fullWidth = false)
+    val clearBtn = makeButton(ctx, "Kosongkan", OverlayColors.BUTTON, fullWidth = false)
+    private val editButtons = LinearLayout(ctx).apply {
+        orientation = LinearLayout.HORIZONTAL
+        visibility = View.GONE
+    }
+    private val editHint = makeText(ctx, 12f, OverlayColors.MUTED).apply {
+        text = EDIT_HINT
+        maxLines = 2
+        visibility = View.GONE
+    }
+    private val editSection = LinearLayout(ctx).apply {
+        orientation = LinearLayout.VERTICAL
+        visibility = View.GONE
+    }
+
+    // ---- hierarchy view ----
+    val hierarchyView = HierarchyPanelView(ctx).apply { visibility = View.GONE }
+
+    private val contentFrame = FrameLayout(ctx)
 
     val parentBtn = makeButton(ctx, "⬆ Induk", OverlayColors.BUTTON, fullWidth = false)
     val childBtn = makeButton(ctx, "⬇ Anak", OverlayColors.BUTTON, fullWidth = false)
@@ -459,6 +520,20 @@ internal class PropertyPanel(private val ctx: Context) {
 
     var collapsed = false
         private set
+
+    var activeTab = Tab.PROPERTIES
+        private set
+
+    private var editMode = EditMode.HIDDEN
+
+    /** Invoked when the user switches tabs. */
+    var onTabChanged: ((Tab) -> Unit)? = null
+
+    /** Invoked when the text field gains focus (so the panel window can accept the soft keyboard). */
+    var onEditFocused: ((EditText) -> Unit)? = null
+
+    /** Invoked when the panel is collapsed or expanded. */
+    var onCollapseChanged: (() -> Unit)? = null
 
     private var filterActive = false
 
@@ -477,9 +552,51 @@ internal class PropertyPanel(private val ctx: Context) {
         )
         root.addView(header, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
 
-        scroll.addView(body, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        tabRow.addView(tabPropBtn, LinearLayout.LayoutParams(0, ctx.dpi(38), 1f))
+        tabRow.addView(tabTreeBtn, LinearLayout.LayoutParams(0, ctx.dpi(38), 1f).apply { marginStart = ctx.dpi(6) })
         root.addView(
-            scroll,
+            tabRow,
+            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                topMargin = ctx.dpi(10)
+            },
+        )
+
+        // Edit section: title, field, buttons, and (alternatively) the opt-in hint.
+        editButtons.addView(applyBtn, LinearLayout.LayoutParams(0, ctx.dpi(40), 1f))
+        editButtons.addView(clearBtn, LinearLayout.LayoutParams(0, ctx.dpi(40), 1f).apply { marginStart = ctx.dpi(6) })
+        editSection.addView(
+            editTitle,
+            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                topMargin = ctx.dpi(10)
+            },
+        )
+        editSection.addView(
+            editText,
+            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                topMargin = ctx.dpi(6)
+            },
+        )
+        editSection.addView(
+            editButtons,
+            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                topMargin = ctx.dpi(8)
+            },
+        )
+        editSection.addView(
+            editHint,
+            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                topMargin = ctx.dpi(6)
+            },
+        )
+
+        propContent.addView(body, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        propContent.addView(editSection, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        propScroll.addView(propContent, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+
+        contentFrame.addView(propScroll, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        contentFrame.addView(hierarchyView, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        root.addView(
+            contentFrame,
             LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
                 topMargin = ctx.dpi(8)
             },
@@ -489,6 +606,18 @@ internal class PropertyPanel(private val ctx: Context) {
         root.addView(buttonRow(refreshBtn, saveBtn, doneBtn), rowParams())
 
         collapseBtn.setOnClickListener { setCollapsed(!collapsed) }
+        tabPropBtn.setOnClickListener { selectTab(Tab.PROPERTIES) }
+        tabTreeBtn.setOnClickListener { selectTab(Tab.HIERARCHY) }
+        editText.setOnFocusChangeListener { _, hasFocus -> if (hasFocus) onEditFocused?.invoke(editText) }
+        editText.setOnEditorActionListener { _, actionId, _ ->
+            if (actionId == EditorInfo.IME_ACTION_DONE) {
+                applyBtn.performClick()
+                true
+            } else {
+                false
+            }
+        }
+        applyTabStyles()
     }
 
     private fun rowParams() =
@@ -509,6 +638,20 @@ internal class PropertyPanel(private val ctx: Context) {
         return row
     }
 
+    private fun applyTabStyles() {
+        setButtonColor(ctx, tabPropBtn, if (activeTab == Tab.PROPERTIES) OverlayColors.BLUE else OverlayColors.BUTTON)
+        setButtonColor(ctx, tabTreeBtn, if (activeTab == Tab.HIERARCHY) OverlayColors.BLUE else OverlayColors.BUTTON)
+    }
+
+    fun selectTab(tab: Tab) {
+        if (activeTab == tab) return
+        activeTab = tab
+        applyTabStyles()
+        propScroll.visibility = if (tab == Tab.PROPERTIES) View.VISIBLE else View.GONE
+        hierarchyView.visibility = if (tab == Tab.HIERARCHY) View.VISIBLE else View.GONE
+        onTabChanged?.invoke(tab)
+    }
+
     fun setContent(titleText: CharSequence, subtitleText: CharSequence?, bodyText: CharSequence, hasSelection: Boolean) {
         title.text = titleText
         if (subtitleText.isNullOrEmpty()) {
@@ -523,8 +666,33 @@ internal class PropertyPanel(private val ctx: Context) {
         setButtonEnabled(copyBtn, hasSelection)
     }
 
+    fun editableActive(): Boolean = editMode == EditMode.EDITABLE
+
+    fun setEditMode(mode: EditMode) {
+        if (editMode == mode) return
+        editMode = mode
+        val editable = mode == EditMode.EDITABLE
+        editSection.visibility = if (mode == EditMode.HIDDEN) View.GONE else View.VISIBLE
+        editTitle.visibility = if (editable) View.VISIBLE else View.GONE
+        editText.visibility = if (editable) View.VISIBLE else View.GONE
+        editButtons.visibility = if (editable) View.VISIBLE else View.GONE
+        editHint.visibility = if (mode == EditMode.HINT) View.VISIBLE else View.GONE
+        if (!editable) editText.clearFocus()
+    }
+
+    /** Current field text. The caller must not store or log it. */
+    fun editTextValue(): String = editText.text?.toString() ?: ""
+
+    fun clearEditText() {
+        editText.setText("")
+    }
+
+    fun blurEdit() {
+        editText.clearFocus()
+    }
+
     fun scrollBodyToTop() {
-        scroll.scrollTo(0, 0)
+        propScroll.scrollTo(0, 0)
     }
 
     fun setFilterActive(active: Boolean) {
@@ -535,14 +703,21 @@ internal class PropertyPanel(private val ctx: Context) {
     }
 
     fun setBodyMaxHeight(px: Int) {
-        scroll.maxHeightPx = px
+        propScroll.maxHeightPx = px
+        hierarchyView.maxHeightPx = px
     }
 
     fun setCollapsed(value: Boolean) {
         if (collapsed == value) return
         collapsed = value
-        scroll.visibility = if (value) View.GONE else View.VISIBLE
+        tabRow.visibility = if (value) View.GONE else View.VISIBLE
+        contentFrame.visibility = if (value) View.GONE else View.VISIBLE
         collapseBtn.text = if (value) "▴" else "▾"
         collapseBtn.contentDescription = if (value) "Bentangkan panel" else "Ciutkan panel"
+        onCollapseChanged?.invoke()
+    }
+
+    private companion object {
+        const val EDIT_HINT = "Aktifkan \"edit teks\" di Pengaturan untuk mengisi kolom ini"
     }
 }

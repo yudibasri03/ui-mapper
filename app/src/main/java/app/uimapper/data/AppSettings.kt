@@ -42,6 +42,14 @@ object AppSettings {
         get() = prefs.getBoolean("overlay_on_connect", true)
         set(v) = edit { putBoolean("overlay_on_connect", v) }
 
+    /**
+     * Opt-in capability: allow the user to set/clear the text of an editable field in the app being
+     * inspected. Off by default. When off, UI Mapper only observes and never acts on other apps.
+     */
+    var allowTextEditing: Boolean
+        get() = prefs.getBoolean("allow_text_editing", false)
+        set(v) = edit { putBoolean("allow_text_editing", v) }
+
     /** App currently selected as mapping target on the home screen. */
     val targetPkg: String?
         get() = prefs.getString("target_pkg", null)
