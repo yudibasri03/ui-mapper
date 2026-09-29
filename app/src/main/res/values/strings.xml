@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">UI Mapper</string>
+    <string name="service_label">UI Mapper – Inspektur UI</string>
+    <string name="service_description">UI Mapper membaca struktur tampilan (elemen, teks tombol, ID, posisi) dari aplikasi yang sedang Anda buka untuk memetakan UI/UX dan rute navigasi tombol saat Anda menjelajahinya sendiri. UI Mapper hanya mengamati dan tidak mengetuk apa pun atas nama Anda. Semua data disimpan lokal di perangkat ini dan tidak dikirim ke mana pun (aplikasi tidak punya izin internet). Isi kolom kata sandi dan teks yang Anda ketik tidak disimpan di data elemen, dan kolom isian serta keyboard ditutup pada tangkapan layar.</string>
+</resources>

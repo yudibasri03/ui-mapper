@@ -1,0 +1,66 @@
+name: Build APK
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write # needed to publish the APK as a GitHub Release
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      # Caches Gradle wrapper + dependencies between runs.
+      - uses: gradle/actions/setup-gradle@v4
+
+      # The exec bit is often lost when the repo is created on Windows.
+      - name: Make gradlew executable
+        run: chmod +x gradlew
+
+      # GitHub's Ubuntu runners ship the Android SDK (ANDROID_HOME), so no local.properties is needed.
+      - name: Build debug APK
+        run: ./gradlew :app:assembleDebug --no-daemon --console=plain
+
+      - name: Lint
+        run: ./gradlew :app:lintDebug --no-daemon --console=plain
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ui-mapper-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lint-report
+          path: app/build/reports/lint-results-debug.html
+          if-no-files-found: ignore
+
+      # Every push to main becomes a release, so the newest APK is always at
+      # https://github.com/<owner>/<repo>/releases/latest/download/ui-mapper-debug.apk
+      - name: Prepare release asset
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: cp app/build/outputs/apk/debug/app-debug.apk ui-mapper-debug.apk
+
+      - name: Publish release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: UI Mapper build ${{ github.run_number }}
+          body: |
+            Debug APK otomatis dari commit ${{ github.sha }}.
+            Pasang di HP, lalu aktifkan layanan aksesibilitas "UI Mapper – Inspektur UI".
+          files: ui-mapper-debug.apk
+          make_latest: true
