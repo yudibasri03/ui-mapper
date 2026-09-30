@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" role="img" aria-label="UI Mapper Web">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2a5bea"/>
+      <stop offset="1" stop-color="#173bb0"/>
+    </linearGradient>
+  </defs>
+  <rect x="6" y="6" width="116" height="116" rx="26" fill="url(#bg)"/>
+  <!-- navigation-map glyph: three nodes linked by edges -->
+  <g fill="none" stroke="#dbe6ff" stroke-width="6" stroke-linecap="round">
+    <path d="M40 44 L40 74"/>
+    <path d="M46 40 L82 40"/>
+    <path d="M46 78 L82 82"/>
+  </g>
+  <g fill="#ffffff" stroke="#173bb0" stroke-width="4">
+    <rect x="26" y="30" width="28" height="20" rx="5"/>
+    <rect x="80" y="28" width="26" height="20" rx="5"/>
+    <rect x="80" y="72" width="26" height="20" rx="5"/>
+    <circle cx="40" cy="86" r="12"/>
+  </g>
+</svg>

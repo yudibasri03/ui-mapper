@@ -1,0 +1,6 @@
+{
+  "type": "module",
+  "private": true,
+  "name": "ui-mapper-web",
+  "version": "1.0.0"
+}

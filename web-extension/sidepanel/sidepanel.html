@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>UI Mapper Web</title>
+  <link rel="stylesheet" href="sidepanel.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- ===== Top bar ===== -->
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">▦</span>
+        <span class="brand-name">UI Mapper Web</span>
+      </div>
+      <div class="status" id="status" title="Status">
+        <span class="dot idle" id="statusDot"></span>
+        <span class="status-line" id="statusLine">Siaga</span>
+      </div>
+    </header>
+
+    <!-- ===== Tab bar ===== -->
+    <nav class="tabbar" id="tabbar" role="tablist">
+      <button class="tab active" data-tab="kontrol" role="tab" type="button">Kontrol</button>
+      <button class="tab" data-tab="inspektur" role="tab" type="button">Inspektur</button>
+      <button class="tab" data-tab="sesi" role="tab" type="button">Sesi</button>
+      <button class="tab" data-tab="log" role="tab" type="button">Log</button>
+    </nav>
+
+    <!-- ===== Panels ===== -->
+    <main class="panels">
+      <!-- Kontrol -->
+      <section id="panel-kontrol" class="panel active" role="tabpanel">
+        <div class="card">
+          <div class="card-title">Tab aktif</div>
+          <div class="kv-row">
+            <span class="muted">Origin</span>
+            <span class="mono ellipsis" id="k-origin">—</span>
+          </div>
+          <p class="hint">Semua tindakan di bawah bekerja pada tab yang sedang aktif di jendela browser.</p>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Tindakan</div>
+          <div class="btn-grid">
+            <button id="btn-inspect" class="action-btn" type="button">
+              <span class="ab-icon">🔍</span>
+              <span class="ab-label">Inspeksi elemen</span>
+              <span class="ab-state" id="st-inspect">nonaktif</span>
+            </button>
+            <button id="btn-record" class="action-btn primary" type="button">
+              <span class="ab-icon">⏺</span>
+              <span class="ab-label" id="lbl-record">Rekam rute</span>
+              <span class="ab-state" id="st-record">berhenti</span>
+            </button>
+            <button id="btn-capture" class="action-btn" type="button">
+              <span class="ab-icon">📸</span>
+              <span class="ab-label">Tangkap layar ini</span>
+              <span class="ab-state ab-hint-inline">snapshot</span>
+            </button>
+            <button id="btn-edit" class="action-btn" type="button">
+              <span class="ab-icon">✏️</span>
+              <span class="ab-label">Mode edit</span>
+              <span class="ab-state" id="st-edit">nonaktif</span>
+            </button>
+          </div>
+          <p class="hint" id="k-hint">Inspeksi menyorot elemen di halaman. Rekam mencatat perpindahan layar saat Anda menjelajah. Tangkap menyimpan snapshot layar kini ke sesi.</p>
+        </div>
+
+        <div class="card subtle">
+          <div class="card-title">Privasi &amp; keamanan</div>
+          <ul class="privacy-list">
+            <li>Tanpa permintaan jaringan — semua data disimpan lokal di browser.</li>
+            <li>Nilai kolom kata sandi tidak pernah dibaca atau disimpan.</li>
+            <li>Teks yang Anda masukkan lewat Mode edit tidak disimpan.</li>
+            <li>Perekaman hanya mengamati; Mode edit hanya bertindak atas perintah Anda.</li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- Inspektur -->
+      <section id="panel-inspektur" class="panel" role="tabpanel">
+        <div id="insp-empty" class="empty">
+          <div class="empty-mark">🔍</div>
+          <p class="empty-title">Belum ada elemen dipilih</p>
+          <p class="empty-sub">Aktifkan <b>Inspeksi elemen</b> lalu klik elemen di halaman, atau buka sebuah layar dari tab <b>Sesi</b>.</p>
+        </div>
+        <div id="insp-content" class="hidden">
+          <div class="card" id="insp-props-card">
+            <div class="card-title-row">
+              <span class="card-title">Properti elemen</span>
+              <button id="btn-copy-node" class="btn-sm" type="button">Salin</button>
+            </div>
+            <div id="insp-props" class="props"></div>
+          </div>
+
+          <div class="card hidden" id="insp-edit">
+            <div class="card-title-row">
+              <span class="card-title">Mode edit</span>
+              <span class="badge warn">aktif</span>
+            </div>
+            <input id="edit-input" class="text-input" type="text" placeholder="Teks untuk diterapkan…" autocomplete="off" />
+            <div class="edit-actions">
+              <button id="edit-apply" class="btn-sm primary" type="button">Terapkan</button>
+              <button id="edit-clear" class="btn-sm" type="button">Kosongkan</button>
+            </div>
+            <p class="hint">Teks yang Anda masukkan tidak disimpan maupun dicatat.</p>
+          </div>
+
+          <div class="card tree-card">
+            <div class="card-title-row">
+              <span class="card-title">Hierarki DOM</span>
+              <span class="row-tools">
+                <button id="btn-follow" class="btn-sm hidden" type="button">Ikuti layar aktif</button>
+                <span class="muted small" id="tree-meta"></span>
+              </span>
+            </div>
+            <div id="insp-tree" class="tree"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Sesi -->
+      <section id="panel-sesi" class="panel" role="tabpanel">
+        <div id="sesi-list-view">
+          <div class="card-title-row list-head">
+            <span class="card-title">Sesi tersimpan</span>
+            <button id="btn-refresh-sessions" class="btn-sm" type="button">Muat ulang</button>
+          </div>
+          <div id="sesi-list" class="sesi-list"></div>
+        </div>
+        <div id="sesi-detail-view" class="hidden"></div>
+      </section>
+
+      <!-- Log -->
+      <section id="panel-log" class="panel" role="tabpanel">
+        <div class="log-toolbar">
+          <span class="card-title">Log</span>
+          <span class="spacer"></span>
+          <button id="log-clear" class="btn-sm" type="button">Bersihkan</button>
+          <button id="log-copy" class="btn-sm" type="button">Salin</button>
+          <button id="log-share" class="btn-sm" type="button">Bagikan .txt</button>
+        </div>
+        <div id="log-feed" class="log-feed" aria-live="polite"></div>
+      </section>
+    </main>
+
+    <div id="toast-host" class="toast-host" aria-live="polite"></div>
+  </div>
+
+  <script type="module" src="sidepanel.js"></script>
+</body>
+</html>

@@ -35,6 +35,12 @@ Cara lain lewat **GitHub Actions**: setiap push ke `main` (atau *Run workflow* d
 
 > Catatan: APK debug hasil build di mesin berbeda memakai kunci tanda tangan berbeda. Uninstall versi lama sebelum memasang APK dari sumber lain.
 
+## Versi Chrome (aplikasi web)
+
+Ada juga ekstensi Chrome untuk memetakan **aplikasi web** di folder [`web-extension/`](web-extension/) (Manifest V3, tanpa build). Ia menginspeksi elemen DOM (properti, selektor CSS, XPath) ala DevTools, menampilkan pohon hierarki, merekam rute navigasi (termasuk SPA), dan mengekspor JSON/Mermaid/DOT/CSV/HTML — semuanya lokal di browser, tanpa jaringan.
+
+Pasang: unduh `ui-mapper-web-extension.zip` dari [Releases](../../releases/latest), ekstrak, buka `chrome://extensions`, nyalakan **Developer mode**, klik **Load unpacked**, pilih folder hasil ekstrak. Rinciannya di [`web-extension/README.md`](web-extension/README.md).
+
 ## Cara pakai
 
 1. Pasang APK, buka **UI Mapper**.

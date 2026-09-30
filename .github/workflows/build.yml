@@ -34,10 +34,29 @@ jobs:
       - name: Lint
         run: ./gradlew :app:lintDebug --no-daemon --console=plain
 
+      # Chrome extension (no build step): validate JS/manifest, then zip the folder.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Check & zip web extension
+        run: |
+          cd web-extension
+          for f in $(find . -name '*.js'); do node --check "$f"; done
+          node -e "JSON.parse(require('fs').readFileSync('manifest.json','utf8'))"
+          cd ..
+          (cd web-extension && zip -qr ../ui-mapper-web-extension.zip . -x 'package.json')
+
       - uses: actions/upload-artifact@v4
         with:
           name: ui-mapper-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ui-mapper-web-extension
+          path: ui-mapper-web-extension.zip
           if-no-files-found: error
 
       - uses: actions/upload-artifact@v4
@@ -60,7 +79,11 @@ jobs:
           tag_name: build-${{ github.run_number }}
           name: UI Mapper build ${{ github.run_number }}
           body: |
-            Debug APK otomatis dari commit ${{ github.sha }}.
-            Pasang di HP, lalu aktifkan layanan aksesibilitas "UI Mapper – Inspektur UI".
-          files: ui-mapper-debug.apk
+            Rilis otomatis dari commit ${{ github.sha }}.
+
+            - Android: unduh ui-mapper-debug.apk, pasang, aktifkan layanan aksesibilitas "UI Mapper – Inspektur UI".
+            - Chrome: unduh ui-mapper-web-extension.zip, ekstrak, buka chrome://extensions, aktifkan Developer mode, "Load unpacked", pilih folder hasil ekstrak.
+          files: |
+            ui-mapper-debug.apk
+            ui-mapper-web-extension.zip
           make_latest: true
